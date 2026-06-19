@@ -1,0 +1,8 @@
+streamlit
+pandas
+moviepy
+opencv-python
+pillow
+oss2
+python-dotenv
+requests
