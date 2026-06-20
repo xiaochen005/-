@@ -1,15 +1,13 @@
-# pages/3_视频上传.py 阶段六升级OSS云端投稿版（已移除moviepy）
+# pages/3_视频上传.py 移除封面生成，消除视频解析依赖报错
 import streamlit as st
 import os
-import cv2
 from datetime import datetime
-from PIL import Image
 from db_utils import db_execute, write_log, db_query
 from oss_upload import upload_file_to_oss
 
 MAX_SIZE_MB = 200
 
-# 登录拦截（阶段六原有逻辑保留）
+# 登录拦截
 if not st.session_state.login_status:
     st.error("登录后上传视频")
     if st.button("登录页面"):
@@ -40,21 +38,9 @@ with tab_upload:
     cate_main = st.selectbox("一级分区", ["生活","科技","游戏","影视","教程","动画","其他"])
     cate_sub = st.text_input("二级子分类")
     video_file = st.file_uploader("上传视频", type=["mp4", "mov"])
+    # 手动上传封面图（替代自动截取）
+    cover_file = st.file_uploader("手动上传封面图片(可选)", type=["jpg", "png"])
     group_opt = st.selectbox("归入合集", ["无合集"] + list(group_df["group_name"]) if not group_df.empty else ["无合集"])
-
-    # 【替换moviepy，改用opencv生成封面】
-    def make_local_cover(vid_path, cover_name):
-        temp_dir = "./static/tmp"
-        os.makedirs(temp_dir, exist_ok=True)
-        cover_path = os.path.join(temp_dir, cover_name)
-        cap = cv2.VideoCapture(vid_path)
-        # 读取第1秒画面，避免黑屏
-        cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
-        ret, frame = cap.read()
-        if ret:
-            cv2.imwrite(cover_path, frame)
-        cap.release()
-        return cover_path
 
     if st.button("确认投稿", type="primary"):
         try:
@@ -70,13 +56,19 @@ with tab_upload:
             temp_vid = f"./static/tmp/{time_tag}_{video_file.name}"
             with open(temp_vid, "wb") as f:
                 f.write(video_file.read())
-
-            # 生成封面并上传OSS
-            cover_local = make_local_cover(temp_vid, f"{time_tag}_cover.jpg")
+            
+            # 上传视频到OSS
             video_oss_url = upload_file_to_oss(temp_vid, "video")
-            cover_oss_url = upload_file_to_oss(cover_local, "cover")
+            
+            # 处理封面：用户手动上传，无自动截取逻辑
+            cover_oss_url = ""
+            if cover_file:
+                temp_cover = f"./static/tmp/{time_tag}_cover.{cover_file.name.split('.')[-1]}"
+                with open(temp_cover, "wb") as f:
+                    f.write(cover_file.read())
+                cover_oss_url = upload_file_to_oss(temp_cover, "cover")
 
-            # 写入数据库（新增sub_category二级分类）
+            # 写入数据库
             up_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             db_execute("""
             INSERT INTO video(title,intro,category,sub_category,video_path,cover_path,upload_user,status,upload_time,collect_count,like_count,play_count)
