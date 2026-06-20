@@ -4,4 +4,4 @@ pillow
 requests
 python-dotenv
 pandas
-opencv-python
+
