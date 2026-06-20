@@ -1,69 +1,87 @@
-# pages/3_视频上传.py
+# pages/3_视频上传.py 移除自动截图，手动上传封面，无视频解析库
 import streamlit as st
-import sqlite3
 import os
 from datetime import datetime
-from moviepy import VideoFileClip
+from db_utils import db_execute, write_log, db_query
+from oss_upload import upload_file_to_oss
 
-DB_PATH = "./database/video_web.db"
-VIDEO_SAVE_PATH = "./static/videos/"
-COVER_SAVE_PATH = "./static/cover/"
+MAX_SIZE_MB = 200
 
-# 权限校验
+# 登录拦截
 if not st.session_state.login_status:
-    st.error("登录后才能上传视频")
-    if st.button("去登录"):
+    st.error("登录后上传视频")
+    if st.button("登录页面"):
         st.switch_page("pages/2_登录注册.py")
     st.stop()
+current_user = st.session_state.username
 
-st.header("📤 上传新视频")
-st.divider()
+st.header("📤 UP主投稿中心")
+st.info(f"仅支持 mp4/mov，文件最大 {MAX_SIZE_MB}MB，资源自动上传阿里云OSS，外网可播放")
 
-# 表单
-title = st.text_input("视频标题", max_chars=60)
-intro = st.text_area("视频简介", max_chars=300)
-category = st.selectbox("分类", ["生活","科技","游戏","影视","教程","其他"])
-video_file = st.file_uploader("上传视频(mp4/mov)", type=["mp4","mov"])
+# 读取当前用户合集
+group_df = db_query("SELECT id,group_name FROM collection_group WHERE upload_user=?", (current_user,))
+tab_upload, tab_create_group = st.tabs(["投稿视频", "新建合集"])
 
-# 自动生成封面函数
-def create_cover(video_local_path, cover_save_name):
-    clip = VideoFileClip(video_local_path)
-    # 截取第1秒画面作为封面
-    frame = clip.get_frame(1)
-    from PIL import Image
-    img = Image.fromarray(frame)
-    img.save(os.path.join(COVER_SAVE_PATH, cover_save_name))
-    clip.close()
-    return os.path.join(COVER_SAVE_PATH, cover_save_name)
-
-# 提交上传
-if st.button("确认上传", type="primary"):
-    if not title or not video_file:
-        st.warning("标题和视频文件必填！")
-    else:
-        # 生成唯一文件名
-        time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        video_name = f"{time_str}_{video_file.name}"
-        cover_name = f"{time_str}_cover.jpg"
-        full_video_path = os.path.join(VIDEO_SAVE_PATH, video_name)
-
-        # 保存视频文件到本地
-        with open(full_video_path, "wb") as f:
-            f.write(video_file.read())
-        
-        # 自动截取封面
-        cover_path = create_cover(full_video_path, cover_name)
-
-        # 写入数据库
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cur.execute('''
-        INSERT INTO video(title,intro,category,video_path,cover_path,upload_user,status,upload_time)
-        VALUES (?,?,?,?,?,?,0,?)
-        ''', (title, intro, category, full_video_path, cover_path, st.session_state.username, upload_time))
-        conn.commit()
-        conn.close()
-
-        st.success("上传成功！等待管理员审核后即可展示")
+# 新建合集
+with tab_create_group:
+    g_name = st.text_input("合集名称")
+    if st.button("创建合集") and g_name.strip():
+        db_execute("INSERT INTO collection_group(group_name,upload_user,create_time) VALUES (?,?,datetime('now','localtime'))",
+                   (g_name, current_user))
+        write_log("创建合集", current_user, f"新建合集：{g_name}")
         st.rerun()
+
+# 投稿表单
+with tab_upload:
+    title = st.text_input("视频标题", max_chars=60)
+    intro = st.text_area("简介", max_chars=300)
+    cate_main = st.selectbox("一级分区", ["生活","科技","游戏","影视","教程","动画","其他"])
+    cate_sub = st.text_input("二级子分类")
+    video_file = st.file_uploader("上传视频", type=["mp4", "mov"])
+    cover_file = st.file_uploader("手动上传封面图片(可选)", type=["jpg", "png"])
+    group_opt = st.selectbox("归入合集", ["无合集"] + list(group_df["group_name"]) if not group_df.empty else ["无合集"])
+
+    if st.button("确认投稿", type="primary"):
+        try:
+            if not title or not video_file:
+                st.warning("标题和视频必填")
+                st.stop()
+            file_mb = video_file.size / 1024 / 1024
+            if file_mb > MAX_SIZE_MB:
+                st.error(f"文件超过{MAX_SIZE_MB}MB限制")
+                st.stop()
+
+            time_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+            temp_vid = f"./static/tmp/{time_tag}_{video_file.name}"
+            with open(temp_vid, "wb") as f:
+                f.write(video_file.read())
+            
+            # 上传视频OSS
+            video_oss_url = upload_file_to_oss(temp_vid, "video")
+            
+            # 手动封面处理
+            cover_oss_url = ""
+            if cover_file:
+                temp_cover = f"./static/tmp/{time_tag}_cover.{cover_file.name.split('.')[-1]}"
+                with open(temp_cover, "wb") as f:
+                    f.write(cover_file.read())
+                cover_oss_url = upload_file_to_oss(temp_cover, "cover")
+
+            # 插入数据库
+            up_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db_execute("""
+            INSERT INTO video(title,intro,category,sub_category,video_path,cover_path,upload_user,status,upload_time,collect_count,like_count,play_count)
+            VALUES (?,?,?,?,?,?,?,0,?,0,0,0)
+            """, (title, intro, cate_main, cate_sub, video_oss_url, cover_oss_url, current_user, up_time))
+
+            # 绑定合集
+            if group_opt != "无合集":
+                g_id = group_df[group_df["group_name"] == group_opt]["id"].iloc[0]
+                new_vid_id = db_query("SELECT id FROM video ORDER BY id DESC LIMIT 1").iloc[0]["id"]
+                db_execute("INSERT INTO group_video_rel(group_id,video_id) VALUES (?,?)", (g_id, new_vid_id))
+
+            write_log("视频上传", current_user, f"投稿视频：{title}")
+            st.success("投稿成功，等待管理员审核，外网可直接播放！")
+            st.rerun()
+        except Exception as err:
+            st.error(f"上传失败：{str(err)}")
