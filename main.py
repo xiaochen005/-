@@ -1,5 +1,6 @@
 # main.py
 import streamlit as st
+from db_utils import db_query
 
 # 全局配置必须放在最顶部
 st.set_page_config(
@@ -21,6 +22,8 @@ def init_session():
         st.session_state.is_admin = False
     if "play_video_id" not in st.session_state:
         st.session_state.play_video_id = None
+    if "visit_up_name" not in st.session_state:
+        st.session_state.visit_up_name = ""
 
 init_session()
 
@@ -29,19 +32,16 @@ with st.sidebar:
     st.header("🎬 视频网站导航")
     st.divider()
 
-    # 主题选择（移除on_change，不再触发回调警告）
     st.radio(
         "页面主题切换",
         ["light", "dark"],
         key="theme"
     )
-    # 手动刷新按钮，点击才切换样式
     if st.button("应用主题"):
         st.rerun()
 
     st.divider()
 
-    # 用户登录区域
     if st.session_state.login_status:
         st.write(f"欢迎：{st.session_state.username}")
         if st.session_state.is_admin:
@@ -51,6 +51,7 @@ with st.sidebar:
             st.session_state.username = ""
             st.session_state.is_admin = False
             st.session_state.play_video_id = None
+            st.session_state.visit_up_name = ""
             st.rerun()
     else:
         st.info("游客身份，请登录使用全部功能")
@@ -97,3 +98,28 @@ st.markdown(custom_css, unsafe_allow_html=True)
 # ====================== 主页内容 ======================
 st.title("🎬 Streamlit轻量化视频网站")
 st.info("左侧切换页面，支持搜索、分类、收藏、点赞评论")
+st.divider()
+
+# 关键：只展示审核通过、未被软删除的视频 is_delete = 0
+video_df = db_query("""
+SELECT id, title, cover_path, category, upload_user, play_count 
+FROM video 
+WHERE status = 1 AND is_delete = 0 
+ORDER BY id DESC
+""")
+
+if video_df.empty:
+    st.warning("暂无已上架视频，前往投稿页面上传内容")
+else:
+    cols = st.columns(3)
+    for idx, row in video_df.iterrows():
+        col = cols[idx % 3]
+        with col:
+            st.image(row["cover_path"], use_container_width=True)
+            st.subheader(row["title"])
+            st.caption(f"分区：{row['category']} | UP主：{row['upload_user']}")
+            st.caption(f"播放量：{row['play_count']}")
+            
+            if st.button("▶ 立即播放", key=f"play_key_{row['id']}"):
+                st.session_state.play_video_id = row["id"]
+                st.switch_page("pages/4_播放详情.py")
