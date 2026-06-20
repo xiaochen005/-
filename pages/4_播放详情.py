@@ -1,9 +1,9 @@
-# pages/4_播放详情.py
+# pages/4_播放详情.py 智能自适应视频播放器｜修复session报错｜无封面
 import streamlit as st
 from datetime import datetime
 from db_utils import db_query, db_execute, write_log
 
-# 兜底初始化会话变量，避免session属性不存在报错
+# 页面内兜底初始化会话变量，杜绝AttributeError
 def init_page_session():
     if "play_video_id" not in st.session_state:
         st.session_state.play_video_id = None
@@ -16,14 +16,16 @@ def init_page_session():
 
 init_page_session()
 
-# 智能自适应播放器CSS：电脑居中限制宽度，手机全屏不变形
+# 智能自适应CSS：手机100%宽度，电脑最大1000px居中，自动等比例不变形
 st.markdown("""
 <style>
+/* 外层容器居中限制最大宽度 */
 .video-wrap {
     max-width: 1000px;
     margin: 0 auto;
     width: 100%;
 }
+/* 视频原生自适应 */
 video {
     width: 100% !important;
     height: auto !important;
@@ -31,6 +33,7 @@ video {
     object-fit: contain !important;
     border-radius: 6px;
 }
+/* 手机端取消最大宽度限制，铺满屏幕 */
 @media (max-width:768px) {
     .video-wrap {
         max-width: 100%;
@@ -39,43 +42,36 @@ video {
 </style>
 """, unsafe_allow_html=True)
 
+DB_PATH = "./database/video_web.db"
 if st.session_state.play_video_id is None:
     st.warning("未选中视频，请返回首页")
     if st.button("返回首页"):
-        st.switch_page("main.py")
+        st.switch_page("pages/1_首页.py")
     st.stop()
 vid = st.session_state.play_video_id
 
-# 安全读取登录状态
+# 安全读取登录会话
 login_status = st.session_state.get("login_status", False)
 login_user = st.session_state.get("username", "") if login_status else ""
 
-# 查询视频数据
+# 播放量+1
+db_execute("UPDATE video SET play_count=play_count+1 WHERE id=?", (vid,))
 video_df = db_query("SELECT * FROM video WHERE id=?", (vid,))
 if video_df.empty:
     st.error("视频不存在")
     st.stop()
 video = video_df.iloc[0]
-
-# 核心拦截：管理员移入回收站的视频禁止播放
-if video["is_delete"] == 1:
-    st.error("该视频已被管理员删除，无法播放")
-    if st.button("返回首页"):
-        st.switch_page("main.py")
-    st.stop()
-
-# 播放量自增
-db_execute("UPDATE video SET play_count=play_count+1 WHERE id=?", (vid,))
-
 v_url = video["video_path"]
-# 封面变量完全注释，不渲染封面
+# 封面完全注释不加载
 # c_url = video["cover_path"]
 up_user = video["upload_user"]
 
 # 页面标题
 st.header(video["title"])
+# 彻底删除封面渲染代码
+# st.image(c_url, width=900, use_container_width=True)
 
-# 自适应视频容器
+# 嵌套div容器实现智能缩放，包裹视频播放器
 st.markdown('<div class="video-wrap">', unsafe_allow_html=True)
 st.video(v_url, format="video/mp4")
 st.markdown('</div>', unsafe_allow_html=True)
