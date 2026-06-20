@@ -1,119 +1,110 @@
-# pages/3_视频上传.py 无视频解析库，手动上传封面，修复session变量报错
+# pages/3_视频上传.py 阶段六升级OSS云端投稿版（修复session+临时目录不存在报错）
 import streamlit as st
 import os
 from datetime import datetime
+from moviepy import VideoFileClip
+from PIL import Image
 from db_utils import db_execute, write_log, db_query
-import oss2
+from oss_upload import upload_file_to_oss
 
 MAX_SIZE_MB = 200
 
-# OSS密钥兼容本地/云端
-try:
-    ACCESS_KEY_ID = st.secrets["ACCESS_KEY_ID"]
-    ACCESS_KEY_SECRET = st.secrets["ACCESS_KEY_SECRET"]
-    ENDPOINT = st.secrets["ENDPOINT"]
-    BUCKET_NAME = st.secrets["BUCKET_NAME"]
-except Exception:
-    from dotenv import load_dotenv
-    load_dotenv()
-    ACCESS_KEY_ID = os.getenv("ACCESS_KEY_ID")
-    ACCESS_KEY_SECRET = os.getenv("ACCESS_KEY_SECRET")
-    ENDPOINT = os.getenv("ENDPOINT")
-    BUCKET_NAME = os.getenv("BUCKET_NAME")
+# ========= 页面兜底初始化会话变量 修复login_status报错 =========
+def init_upload_session():
+    if "login_status" not in st.session_state:
+        st.session_state.login_status = False
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+init_upload_session()
 
-# OSS上传函数内嵌
-def upload_file_to_oss(local_file_path, save_folder="video"):
-    auth = oss2.Auth(ACCESS_KEY_ID, ACCESS_KEY_SECRET)
-    bucket = oss2.Bucket(auth, ENDPOINT, BUCKET_NAME)
-    time_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.basename(local_file_path)
-    oss_key = f"{save_folder}/{time_tag}_{filename}"
-    bucket.put_object_from_file(oss_key, local_file_path)
-    return f"https://{BUCKET_NAME}.{ENDPOINT}/{oss_key}"
-
-# 修复session不存在报错：用get获取，无则默认False
+# 安全读取会话变量
 login_status = st.session_state.get("login_status", False)
-if not login_status:
-    st.error("请先登录后再上传视频")
-    if st.button("前往登录页面"):
-        st.switch_page("pages/2_登录注册.py")
-    st.stop()
 current_user = st.session_state.get("username", "")
 
-st.header("📤 UP主投稿中心")
-st.info(f"仅支持 mp4/mov，单文件上限 {MAX_SIZE_MB}MB；必须手动上传封面图片")
+# 登录拦截
+if not login_status:
+    st.error("登录后上传视频")
+    if st.button("登录页面"):
+        st.switch_page("pages/2_登录注册.py")
+    st.stop()
 
-# 查询用户合集
-group_data = db_query("SELECT id,group_name FROM collection_group WHERE upload_user=?", (current_user,))
+st.header("📤 UP主投稿中心")
+st.info(f"仅支持 mp4/mov，文件最大 {MAX_SIZE_MB}MB，资源自动上传阿里云OSS，外网可播放")
+
+# 读取当前用户合集
+group_df = db_query("SELECT id,group_name FROM collection_group WHERE upload_user=?", (current_user,))
 tab_upload, tab_create_group = st.tabs(["投稿视频", "新建合集"])
 
 # 新建合集
 with tab_create_group:
-    group_name_input = st.text_input("合集名称")
-    if st.button("创建合集") and group_name_input.strip():
-        db_execute(
-            "INSERT INTO collection_group(group_name,upload_user,create_time) VALUES (?,?,datetime('now','localtime'))",
-            (group_name_input, current_user)
-        )
-        write_log("创建合集", current_user, f"新建合集：{group_name_input}")
+    g_name = st.text_input("合集名称")
+    if st.button("创建合集") and g_name.strip():
+        db_execute("INSERT INTO collection_group(group_name,upload_user,create_time) VALUES (?,?,datetime('now','localtime'))",
+                   (g_name, current_user))
+        write_log("创建合集", current_user, f"新建合集：{g_name}")
         st.rerun()
 
 # 投稿表单
 with tab_upload:
     title = st.text_input("视频标题", max_chars=60)
-    intro = st.text_area("视频简介", max_chars=300)
-    main_category = st.selectbox("一级分区", ["生活","科技","游戏","影视","教程","动画","其他"])
-    sub_category = st.text_input("二级子分类（选填）")
-    video_upload = st.file_uploader("上传视频文件", type=["mp4", "mov"])
-    custom_cover = st.file_uploader("上传封面图片【必填】", type=["jpg", "png"])
+    intro = st.text_area("简介", max_chars=300)
+    cate_main = st.selectbox("一级分区", ["生活","科技","游戏","影视","教程","动画","其他"])
+    cate_sub = st.text_input("二级子分类")
+    video_file = st.file_uploader("上传视频", type=["mp4", "mov"])
+    group_opt = st.selectbox("归入合集", ["无合集"] + list(group_df["group_name"]) if not group_df.empty else ["无合集"])
 
-    group_list = ["无合集"]
-    if not group_data.empty:
-        group_list += list(group_data["group_name"])
-    select_group = st.selectbox("归入合集", group_list)
+    # 临时生成封面
+    def make_local_cover(vid_path, cover_name):
+        clip = VideoFileClip(vid_path)
+        frame = clip.get_frame(1)
+        img = Image.fromarray(frame)
+        temp_dir = "./static/tmp"
+        os.makedirs(temp_dir, exist_ok=True)
+        cover_path = os.path.join(temp_dir, cover_name)
+        img.save(cover_path)
+        clip.close()
+        return cover_path
 
     if st.button("确认投稿", type="primary"):
         try:
-            if not title or not video_upload or not custom_cover:
-                st.warning("标题、视频、封面图片均为必填项")
+            if not title or not video_file:
+                st.warning("标题和视频必填")
                 st.stop()
-            file_size_mb = video_upload.size / 1024 / 1024
-            if file_size_mb > MAX_SIZE_MB:
-                st.error(f"文件超出{MAX_SIZE_MB}MB限制")
+            file_mb = video_file.size / 1024 / 1024
+            if file_mb > MAX_SIZE_MB:
+                st.error(f"文件超过{MAX_SIZE_MB}MB限制")
                 st.stop()
 
             time_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
             temp_dir = "./static/tmp"
+            # ========== 修复：提前创建临时目录，防止不存在报错 ==========
             os.makedirs(temp_dir, exist_ok=True)
+            temp_vid = os.path.join(temp_dir, f"{time_tag}_{video_file.name}")
+            
+            # 写入临时视频文件
+            with open(temp_vid, "wb") as f:
+                f.write(video_file.read())
 
-            # 临时保存视频
-            temp_video_path = os.path.join(temp_dir, f"{time_tag}_{video_upload.name}")
-            with open(temp_video_path, "wb") as f:
-                f.write(video_upload.read())
+            # 生成封面并上传OSS
+            cover_local = make_local_cover(temp_vid, f"{time_tag}_cover.jpg")
+            video_oss_url = upload_file_to_oss(temp_vid, "video")
+            cover_oss_url = upload_file_to_oss(cover_local, "cover")
 
-            # 临时保存封面
-            cover_temp_path = os.path.join(temp_dir, f"{time_tag}_cover.{custom_cover.name.split('.')[-1]}")
-            with open(cover_temp_path, "wb") as f:
-                f.write(custom_cover.read())
-
-            # 上传OSS
-            video_oss_url = upload_file_to_oss(temp_video_path, "video")
-            cover_oss_url = upload_file_to_oss(cover_temp_path, "cover")
-
-            upload_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 写入数据库，增加is_delete软删除字段默认0
+            up_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             db_execute("""
-                INSERT INTO video(title,intro,category,sub_category,video_path,cover_path,upload_user,status,upload_time,collect_count,like_count,play_count)
-                VALUES (?,?,?,?,?,?,?,0,?,0,0,0)
-            """, (title, intro, main_category, sub_category, video_oss_url, cover_oss_url, current_user, upload_time))
+            INSERT INTO video(title,intro,category,sub_category,video_path,cover_path,upload_user,status,upload_time,collect_count,like_count,play_count,is_delete)
+            VALUES (?,?,?,?,?,?,?,0,?,0,0,0,0)
+            """, (title, intro, cate_main, cate_sub, video_oss_url, cover_oss_url, current_user, up_time))
 
-            # 绑定合集
-            if select_group != "无合集":
-                group_id = group_data[group_data["group_name"] == select_group]["id"].iloc[0]
-                new_video_id = db_query("SELECT id FROM video ORDER BY id DESC LIMIT 1").iloc[0]["id"]
-                db_execute("INSERT INTO group_video_rel(group_id,video_id) VALUES (?,?)", (group_id, new_video_id))
+            # 绑定合集 修复iloc列取值报错
+            if group_opt != "无合集":
+                g_id = group_df[group_df["group_name"] == group_opt]["id"].iloc[0]
+                new_vid_id = db_query("SELECT id FROM video ORDER BY id DESC LIMIT 1").iloc[0]["id"]
+                db_execute("INSERT INTO group_video_rel(group_id,video_id) VALUES (?,?)", (g_id, new_vid_id))
 
-            write_log("视频投稿上传", current_user, f"投稿视频：{title}")
-            st.success("投稿成功！视频与封面已上传OSS，等待审核")
+            write_log("视频上传", current_user, f"投稿视频：{title}")
+            st.success("投稿成功，等待管理员审核，外网可直接播放！")
             st.rerun()
-        except Exception as e:
-            st.error(f"投稿失败：{str(e)}")
+        except Exception as err:
+            st.error(f"上传失败：{str(err)}")
