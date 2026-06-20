@@ -1,33 +1,84 @@
-# pages/4_播放详情.py 阶段六升级弹幕+举报+OSS外网播放
+# pages/4_播放详情.py
 import streamlit as st
 from datetime import datetime
 from db_utils import db_query, db_execute, write_log
 
-DB_PATH = "./database/video_web.db"
-if "play_video_id" not in st.session_state or st.session_state.play_video_id is None:
+# 兜底初始化会话变量，避免session属性不存在报错
+def init_page_session():
+    if "play_video_id" not in st.session_state:
+        st.session_state.play_video_id = None
+    if "login_status" not in st.session_state:
+        st.session_state.login_status = False
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+    if "visit_up_name" not in st.session_state:
+        st.session_state.visit_up_name = ""
+
+init_page_session()
+
+# 智能自适应播放器CSS：电脑居中限制宽度，手机全屏不变形
+st.markdown("""
+<style>
+.video-wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+    width: 100%;
+}
+video {
+    width: 100% !important;
+    height: auto !important;
+    display: block;
+    object-fit: contain !important;
+    border-radius: 6px;
+}
+@media (max-width:768px) {
+    .video-wrap {
+        max-width: 100%;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+if st.session_state.play_video_id is None:
     st.warning("未选中视频，请返回首页")
     if st.button("返回首页"):
-        st.switch_page("pages/1_首页.py")
+        st.switch_page("main.py")
     st.stop()
 vid = st.session_state.play_video_id
-login_user = st.session_state.username if st.session_state.login_status else ""
 
-# 播放量+1（阶段六原有逻辑保留）
-db_execute("UPDATE video SET play_count=play_count+1 WHERE id=?", (vid,))
+# 安全读取登录状态
+login_status = st.session_state.get("login_status", False)
+login_user = st.session_state.get("username", "") if login_status else ""
+
+# 查询视频数据
 video_df = db_query("SELECT * FROM video WHERE id=?", (vid,))
 if video_df.empty:
     st.error("视频不存在")
     st.stop()
 video = video_df.iloc[0]
+
+# 核心拦截：管理员移入回收站的视频禁止播放
+if video["is_delete"] == 1:
+    st.error("该视频已被管理员删除，无法播放")
+    if st.button("返回首页"):
+        st.switch_page("main.py")
+    st.stop()
+
+# 播放量自增
+db_execute("UPDATE video SET play_count=play_count+1 WHERE id=?", (vid,))
+
 v_url = video["video_path"]
-c_url = video["cover_path"]
+# 封面变量完全注释，不渲染封面
+# c_url = video["cover_path"]
 up_user = video["upload_user"]
 
-# 页面渲染
+# 页面标题
 st.header(video["title"])
-st.image(c_url, width=900, use_container_width=True)
-# OSS外网视频播放器
-st.video(v_url)
+
+# 自适应视频容器
+st.markdown('<div class="video-wrap">', unsafe_allow_html=True)
+st.video(v_url, format="video/mp4")
+st.markdown('</div>', unsafe_allow_html=True)
 
 # 跳转UP主页按钮
 if st.button(f"进入UP主页：{up_user}"):
@@ -40,12 +91,12 @@ st.divider()
 
 # 点赞、收藏、举报三栏
 col1, col2, col3 = st.columns(3)
-# 点赞（阶段六原有）
+# 点赞
 with col1:
     if st.button("👍 点赞"):
         db_execute("UPDATE video SET like_count=like_count+1 WHERE id=?", (vid,))
         st.rerun()
-# 收藏（阶段六原有）
+# 收藏
 with col2:
     if login_user:
         collect_df = db_query("SELECT id FROM collect WHERE username=? AND video_id=?", (login_user, vid))
@@ -62,7 +113,7 @@ with col2:
                 st.rerun()
     else:
         st.info("登录后收藏")
-# 新增举报功能
+# 举报
 with col3:
     report_reason = st.text_input("举报理由")
     if st.button("提交举报") and login_user and report_reason.strip():
@@ -71,7 +122,7 @@ with col3:
         st.success("举报已提交")
 st.divider()
 
-# 新增弹幕模块
+# 弹幕模块
 st.subheader("弹幕")
 danmaku_df = db_query("SELECT * FROM danmaku WHERE video_id=? ORDER BY play_second ASC", (vid,))
 for _, dm in danmaku_df.iterrows():
@@ -87,7 +138,7 @@ if login_user:
         write_log("发送弹幕", login_user, f"视频{vid}弹幕：{dm_text}")
         st.rerun()
 
-# 评论区（阶段六原有逻辑完全保留）
+# 评论区
 st.subheader("评论区")
 comment_df = db_query("SELECT username,content,comment_time FROM comment WHERE video_id=? ORDER BY comment_time DESC", (vid,))
 for _, row in comment_df.iterrows():
