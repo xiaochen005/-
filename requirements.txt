@@ -1,0 +1,6 @@
+streamlit
+oss2
+pillow
+requests
+python-dotenv
+pandas
