@@ -1,4 +1,4 @@
-# pages/3_视频上传.py 无视频解析库，仅手动上传封面
+# pages/3_视频上传.py 无视频解析库，手动上传封面，修复session变量报错
 import streamlit as st
 import os
 from datetime import datetime
@@ -31,13 +31,14 @@ def upload_file_to_oss(local_file_path, save_folder="video"):
     bucket.put_object_from_file(oss_key, local_file_path)
     return f"https://{BUCKET_NAME}.{ENDPOINT}/{oss_key}"
 
-# 登录拦截
-if not st.session_state.login_status:
+# 修复session不存在报错：用get获取，无则默认False
+login_status = st.session_state.get("login_status", False)
+if not login_status:
     st.error("请先登录后再上传视频")
     if st.button("前往登录页面"):
         st.switch_page("pages/2_登录注册.py")
     st.stop()
-current_user = st.session_state.username
+current_user = st.session_state.get("username", "")
 
 st.header("📤 UP主投稿中心")
 st.info(f"仅支持 mp4/mov，单文件上限 {MAX_SIZE_MB}MB；必须手动上传封面图片")
