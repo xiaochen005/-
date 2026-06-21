@@ -1,7 +1,9 @@
 streamlit
-oss2
-pillow
-requests
-python-dotenv
 pandas
+moviepy
+opencv-python
+pillow
+oss2
+python-dotenv
+requests
 
