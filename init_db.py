@@ -1,10 +1,14 @@
-# init_db.py 兼容旧表自动补字段完整版
+# init_db.py 兼容旧表自动补字段完整版（解决循环导入）
 import sqlite3
 import os
+import hashlib
 from datetime import datetime
-from db_utils import encrypt_pwd  # 新增这一行
 
 DB_PATH = "./database/video_web.db"
+
+# 本地内置加密函数，不再从db_utils导入，打破循环依赖
+def encrypt_pwd(raw_pwd: str) -> str:
+    return hashlib.md5(raw_pwd.encode("utf-8")).hexdigest()
 
 def init_database():
     # 自动创建database文件夹
@@ -107,7 +111,7 @@ def init_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         opt_type TEXT,
         opt_user TEXT,
-        opt_content TEXT,
+        opt_desc TEXT,
         opt_time TEXT
     )
     ''')
@@ -117,7 +121,7 @@ def init_database():
     CREATE TABLE IF NOT EXISTS collection_group (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         group_name TEXT,
-        upload_user TEXT,
+        create_user TEXT,
         create_time TEXT
     )
     ''')
@@ -131,19 +135,19 @@ def init_database():
     )
     ''')
 
-   # 初始化默认管理员账号 admin / 123456
-cursor.execute("SELECT * FROM user WHERE username='admin'")
-if not cursor.fetchone():
-    plain_pwd = "123456"
-    secure_pwd = encrypt_pwd(plain_pwd)
-    cursor.execute(
-        "INSERT INTO user (username, password, is_admin, register_time) VALUES (?,?,?,?)",
-        ("admin", secure_pwd, 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
+    # 管理员密码加密入库（使用本文件内置加密函数）
+    cursor.execute("SELECT * FROM user WHERE username='admin'")
+    if not cursor.fetchone():
+        raw_password = "123456"
+        md5_password = encrypt_pwd(raw_password)
+        cursor.execute(
+            "INSERT INTO user (username, password, is_admin, register_time) VALUES (?,?,?,?)",
+            ("admin", md5_password, 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
 
     conn.commit()
     conn.close()
-    print("✅ 数据库初始化完成，自动补齐sub_category、is_delete字段")
+    print("✅ 数据库初始化完成，自动补齐sub_category、is_delete字段，管理员密码已加密")
 
 if __name__ == "__main__":
     init_database()
