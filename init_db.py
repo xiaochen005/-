@@ -1,15 +1,13 @@
-# init_db.py 完整版 包含所有表 + sub_category + is_delete 字段
+# init_db.py 兼容旧表自动补字段完整版
 import sqlite3
 import os
 from datetime import datetime
 
-# 数据库文件路径
 DB_PATH = "./database/video_web.db"
 
 def init_database():
-    # 自动创建database文件夹，防止路径不存在报错
+    # 自动创建database文件夹
     os.makedirs("./database", exist_ok=True)
-    # 连接数据库（不存在则自动创建）
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -24,14 +22,13 @@ def init_database():
         )
     ''')
 
-    # 2. 视频数据表（新增 sub_category、is_delete）
+    # 2. 视频基础表（旧表存在不会覆盖，后续自动补字段）
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS video (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             intro TEXT,
             category TEXT NOT NULL,
-            sub_category TEXT,
             video_path TEXT NOT NULL,
             cover_path TEXT NOT NULL,
             play_count INTEGER DEFAULT 0,
@@ -39,11 +36,21 @@ def init_database():
             collect_count INTEGER DEFAULT 0,
             upload_user TEXT NOT NULL,
             status INTEGER DEFAULT 0,
-            upload_time TEXT NOT NULL,
-            is_delete INTEGER DEFAULT 0
+            upload_time TEXT NOT NULL
         )
     ''')
     # status状态：0=待审核，1=已上线，2=已下架
+
+    # 核心逻辑：自动检测video表缺失字段并新增
+    cursor.execute("PRAGMA table_info(video);")
+    all_cols = [row[1] for row in cursor.fetchall()]
+
+    # 补二级分类 sub_category
+    if "sub_category" not in all_cols:
+        cursor.execute("ALTER TABLE video ADD COLUMN sub_category TEXT;")
+    # 补软删除标记 is_delete，默认0未删除
+    if "is_delete" not in all_cols:
+        cursor.execute("ALTER TABLE video ADD COLUMN is_delete INTEGER DEFAULT 0;")
 
     # 3. 评论数据表
     cursor.execute('''
@@ -123,7 +130,7 @@ def init_database():
     )
     ''')
 
-    # 初始化默认管理员账号（账号：admin 密码：123456）
+    # 初始化默认管理员账号 admin / 123456
     cursor.execute("SELECT * FROM user WHERE username='admin'")
     if not cursor.fetchone():
         cursor.execute(
@@ -133,8 +140,7 @@ def init_database():
 
     conn.commit()
     conn.close()
-    print("✅ 完整数据库初始化完成")
-    print("管理员账号：admin  密码：123456")
+    print("✅ 数据库初始化完成，自动补齐sub_category、is_delete字段")
 
 if __name__ == "__main__":
     init_database()
