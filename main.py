@@ -104,7 +104,7 @@ st.divider()
 video_df = db_query("""
 SELECT id, title, cover_path, category, upload_user, play_count 
 FROM video 
-WHERE status = 1 AND is_delete = 0
+WHERE status = 1 
 ORDER BY id DESC
 """)
 
