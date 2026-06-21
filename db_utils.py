@@ -36,7 +36,7 @@ def db_execute(sql: str, params=()):
 # 写入操作日志
 def write_log(opt_type, username, desc):
     time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sql = "INSERT INTO operation_log(opt_type, username, opt_desc, opt_time) VALUES (?,?,?,?)"
+    sql = "INSERT INTO operation_log(opt_type, opt_user, opt_desc, opt_time) VALUES (?,?,?,?)"
     db_execute(sql, (opt_type, username, desc, time_now))
 
 # 分页查询封装
