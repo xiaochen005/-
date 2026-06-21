@@ -2,6 +2,7 @@
 import sqlite3
 import os
 from datetime import datetime
+from db_utils import encrypt_pwd  # 新增这一行
 
 DB_PATH = "./database/video_web.db"
 
@@ -130,13 +131,15 @@ def init_database():
     )
     ''')
 
-    # 初始化默认管理员账号 admin / 123456
-    cursor.execute("SELECT * FROM user WHERE username='admin'")
-    if not cursor.fetchone():
-        cursor.execute(
-            "INSERT INTO user (username, password, is_admin, register_time) VALUES (?,?,?,?)",
-            ("admin", "123456", 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
+   # 初始化默认管理员账号 admin / 123456
+cursor.execute("SELECT * FROM user WHERE username='admin'")
+if not cursor.fetchone():
+    plain_pwd = "123456"
+    secure_pwd = encrypt_pwd(plain_pwd)
+    cursor.execute(
+        "INSERT INTO user (username, password, is_admin, register_time) VALUES (?,?,?,?)",
+        ("admin", secure_pwd, 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
 
     conn.commit()
     conn.close()
