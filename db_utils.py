@@ -1,11 +1,11 @@
-import init_db
-# 启动自动建全量表，缺失字段自动创建
-init_db.init_database()
-# db_utils.py 全局数据库工具（完整含encrypt_pwd）
+# db_utils.py 全局数据库工具（完整含encrypt_pwd，启动自动修复数据表）
 import sqlite3
 import pandas as pd
 import hashlib
 from datetime import datetime
+# 新增：导入并自动执行数据库初始化/字段补齐
+import init_db
+init_db.init_database()
 
 DB_PATH = "./database/video_web.db"
 
