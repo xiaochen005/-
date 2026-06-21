@@ -1,3 +1,6 @@
+import init_db
+# 启动自动建全量表，缺失字段自动创建
+init_db.init_database()
 # db_utils.py 全局数据库工具（完整含encrypt_pwd）
 import sqlite3
 import pandas as pd
