@@ -1,22 +1,17 @@
-# 密钥环境变量
-.env
-.env.local
-.env.dev
-.env.prod
-# 临时视频/封面缓存
-static/tmp/*
-# Python缓存
-__pycache__/
-*.pyc
-# Streamlit缓存
-.streamlit/
-# 本地静态视频（全量迁移OSS，本地不存）
-static/videos/*
-static/cover/*
-# 系统文件
-.DS_Store
+# 数据库
 database/*.db
+# 密钥
 .env
+# 本地视频封面缓存
+static/videos/
+static/cover/
 static/tmp/
 temp/
+# 本地补丁脚本
+add_is_delete_field.py
+patch_video_table.py
+add_column.py
+# 缓存文件
 __pycache__/
+*.pyc
+*.log
