@@ -32,7 +32,7 @@ st.header("📤 UP主投稿中心")
 st.info(f"仅支持 mp4/mov，文件最大 {MAX_SIZE_MB}MB，资源自动上传阿里云OSS，外网可播放")
 
 # 读取当前用户合集
-group_df = db_query("SELECT id,group_name FROM collection_group WHERE upload_user=?", (current_user,))
+group_df = db_query("SELECT id,group_name FROM collection_group WHERE create_user=?", (current_user,))
 tab_upload, tab_create_group = st.tabs(["投稿视频", "新建合集"])
 
 # 新建合集
